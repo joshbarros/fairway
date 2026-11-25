@@ -51,6 +51,7 @@ Fairway converts each asset to a fiat currency for the independent FX benchmark.
 - `NGNC` maps to `NGN`, `USDC` to `USD`, `EURC` to `EUR`, and so on.
 - A four-letter code ending in `C` falls back to its first three letters. For example, `BRLC` maps to `BRL`.
 - If neither rule is correct for your asset, add an explicit case and a unit test in `internal/reference/reference_test.go`.
+- `AssetToCurrency` is keyed only by the asset code. If two issuers share a code with different fiat pegs, do not add a duplicate case; the asset is unsupported until the mapping can distinguish issuers.
 
 Both sides need a mapping. If a side cannot be mapped to a fiat currency, the measurement cannot produce a meaningful USD-equivalent reference.
 
@@ -58,7 +59,7 @@ Native XLM is represented with an empty issuer, but `AssetToCurrency` returns `X
 
 ## 4. Add the configuration entry
 
-Append the corridor to `corridors.yaml`:
+Append the corridor to the file configured by `CORRIDORS_FILE` (`corridors.yaml` by default):
 
 ```yaml
   - name: "SELL/BUY"
@@ -87,12 +88,17 @@ Field notes:
 - `target_usd_value` is the economic trade size. Fairway scales the sell amount with live reference rates instead of measuring a flat asset-unit amount.
 - `sell_*` and `buy_*` describe the two legs independently.
 - `verification_date` is the date you checked the metadata.
-- `enabled: false` prevents a new entry from being seeded. For a corridor that is already in the database, set `enabled: false` in `corridors.yaml` **and** disable the existing row:
+- `enabled: false` prevents a new entry from being seeded. For a corridor that is already in the database, set `enabled: false` in `corridors.yaml`, stop the app, disable the existing row, then rebuild and start the app with the disabled entry:
 
 ```bash
+docker compose stop app
 docker compose up -d --wait postgres
-docker compose exec postgres psql -U fairway -d fairway -c "UPDATE corridors SET enabled = FALSE WHERE name = 'SELL/BUY';"
+docker compose exec postgres psql -U fairway -d fairway -c "UPDATE corridors SET enabled = FALSE WHERE name = 'SELL/BUY' RETURNING name;"
+docker compose build app
+docker compose up -d --force-recreate app
 ```
+
+Replace `SELL/BUY` with the corridor name. Confirm the update returned exactly one row before rebuilding; stop if it returns zero or multiple rows.
 
 The loader skips disabled YAML entries. If the YAML entry stays `enabled: true`, the next startup re-enables the database row.
 
@@ -148,13 +154,15 @@ If the corridor is disabled, confirm that it does not appear in the API response
 
 - Keep the diff limited to the corridor entry, any FX mapping, and the supporting evidence.
 - Include the issuer identifiers and the verification evidence in the PR description or in `docs/corridor-verification.md`.
-- Run `go vet ./...`, `golangci-lint run`, and the test suite. The store and scheduler integration tests skip when `DATABASE_URL` is unset, so export a reachable test database first:
+- Run `go vet ./...`, `golangci-lint run`, and the test suite against a reachable, disposable test database. When `DATABASE_URL` is unset, the store and scheduler tests may use default localhost databases on ports 5433 and 5432; they skip only when none responds. Do not rely on that fallback:
 
   ```bash
-  export DATABASE_URL='postgres://user:pass@host:5432/db?sslmode=disable'
+  # Use your own disposable test database, not the Compose postgres service.
+  export DATABASE_URL='postgres://localhost:5432/fairway_test?sslmode=disable'
+  psql "$DATABASE_URL" -f schema.sql
   go test -race -v ./...
   ```
 
-  Check the verbose output and confirm that the store and scheduler database tests actually ran. If `DATABASE_URL` is set but unreachable, the test helper skips them and `go test` can still exit successfully.
+  Use a credential-free disposable database, never a credential-bearing production URL; verbose test failures can print connection details. Check the output and confirm that the store and scheduler database tests actually ran. If the configured database is unreachable, the helper skips them and `go test` can still exit successfully.
 
 - Do not include secrets, private credentials, or unverified claims about third-party APIs.
