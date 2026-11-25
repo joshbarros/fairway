@@ -84,7 +84,7 @@ Append the corridor to the file configured by `CORRIDORS_FILE` (`corridors.yaml`
 
 Field notes:
 
-- `name` must be unique. Use `SELL/BUY`.
+- `name` must be unique and is the database key. Use `SELL/BUY` when it is unambiguous; if two issuers share the same asset code and fiat peg, add an issuer suffix (for example `SELL/BUY-GA...`) so the second entry does not overwrite the first.
 - `target_usd_value` is the economic trade size. Fairway scales the sell amount with live reference rates instead of measuring a flat asset-unit amount.
 - `sell_*` and `buy_*` describe the two legs independently.
 - `verification_date` is the date you checked the metadata.
@@ -112,6 +112,8 @@ Create the local environment and start the stack:
 [ -f .env ] || cp .env.example .env
 docker compose up --build -d
 ```
+
+These commands use the default `corridors.yaml`. If `CORRIDORS_FILE` points to a custom file, mount that file into the app container and set the same `CORRIDORS_FILE` value in `docker-compose.yml`; otherwise the custom file will not be seeded.
 
 Wait for PostgreSQL and Fairway to start, then check health and the seeded corridors:
 
